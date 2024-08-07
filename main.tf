@@ -3,36 +3,36 @@ provider "aws" {
 }
 
 # VPC and Networking
-resource "aws_vpc" "main" {
+resource "aws_vpc" "cf-service-fargate" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_hostnames = true
 
   tags = {
-    Name = "main"
+    Name = "cf-service-fargate"
   }
 }
 
-resource "aws_internet_gateway" "main" {
-  vpc_id = aws_vpc.main.id
+resource "aws_internet_gateway" "cf-service-fargate" {
+  vpc_id = aws_vpc.cf-service-fargate.id
 
   tags = {
-    Name = "main"
+    Name = "cf-service-fargate"
   }
 }
 
-resource "aws_subnet" "main" {
-  vpc_id                  = aws_vpc.main.id
+resource "aws_subnet" "cf-service-fargate" {
+  vpc_id                  = aws_vpc.cf-service-fargate.id
   cidr_block              = "10.0.1.0/24"
   availability_zone       = "us-west-2a"
   map_public_ip_on_launch = true
 
   tags = {
-    Name = "Main"
+    Name = "cf-service-fargate"
   }
 }
 
 resource "aws_subnet" "secondary" {
-  vpc_id                  = aws_vpc.main.id
+  vpc_id                  = aws_vpc.cf-service-fargate.id
   cidr_block              = "10.0.2.0/24"
   availability_zone       = "us-west-2b"
   map_public_ip_on_launch = true
@@ -42,22 +42,22 @@ resource "aws_subnet" "secondary" {
   }
 }
 
-resource "aws_route_table" "main" {
+resource "aws_route_table" "cf-service-fargate" {
   vpc_id = aws_vpc.main.id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.main.id
+    gateway_id = aws_internet_gateway.cf-service-fargate.id
   }
 
   tags = {
-    Name = "main"
+    Name = "cf-service-fargate"
   }
 }
 
 resource "aws_route_table_association" "main" {
-  subnet_id      = aws_subnet.main.id
-  route_table_id = aws_route_table.main.id
+  subnet_id      = aws_subnet.cf-service-fargate.id
+  route_table_id = aws_route_table.cf-service-fargate.id
 }
 
 resource "aws_route_table_association" "secondary" {
@@ -65,10 +65,10 @@ resource "aws_route_table_association" "secondary" {
   route_table_id = aws_route_table.main.id
 }
 
-resource "aws_security_group" "app_sg" {
+resource "aws_security_group" "cf-service-fargate" {
   name        = "allow_app_traffic"
   description = "Allow inbound traffic"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = aws_vpc.cf-service-fargate.id
 
   ingress {
     description = "TLS from VPC"
@@ -122,19 +122,19 @@ resource "aws_ecs_task_definition" "app_task" {
 }
 
 # Application Load Balancer
-resource "aws_lb" "app_lb" {
-  name               = "spring-app-lb"
+resource "aws_lb" "cf-service-fargate_lb" {
+  name               = "spring-cf-service-fargate-lb"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.lb_sg.id]
-  subnets            = [aws_subnet.main.id, aws_subnet.secondary.id]
+  subnets            = [aws_subnet.cf-service-fargate.id, aws_subnet.secondary.id]
 }
 
-resource "aws_lb_target_group" "app_tg" {
+resource "aws_lb_target_group" "cf-service-fargate_tg" {
   name        = "spring-app-tg"
   port        = 8080
   protocol    = "HTTP"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = aws_vpc.cf-service-fargate.id
   target_type = "ip"
 
   health_check {
@@ -143,13 +143,13 @@ resource "aws_lb_target_group" "app_tg" {
 }
 
 resource "aws_lb_listener" "front_end" {
-  load_balancer_arn = aws_lb.app_lb.arn
+  load_balancer_arn = aws_lb.cf-service-fargate_lb.arn
   port              = "80"
   protocol          = "HTTP"
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.app_tg.arn
+    target_group_arn = aws_lb_target_group.cf-service-fargate_tg.arn
   }
 }
 
@@ -157,7 +157,7 @@ resource "aws_lb_listener" "front_end" {
 resource "aws_security_group" "lb_sg" {
   name        = "allow_http"
   description = "Allow HTTP inbound traffic"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = aws_vpc.cf-service-fargate.id
 
   ingress {
     description = "HTTP from anywhere"
@@ -179,19 +179,19 @@ resource "aws_security_group" "lb_sg" {
 resource "aws_ecs_service" "app_service" {
   name            = "spring-app-service"
   cluster         = aws_ecs_cluster.app_cluster.id
-  task_definition = aws_ecs_task_definition.app_task.arn
+  task_definition = aws_ecs_task_definition.cf-service-fargate_task.arn
   launch_type     = "FARGATE"
   desired_count   = 1
 
   network_configuration {
     subnets          = [aws_subnet.main.id, aws_subnet.secondary.id]
     assign_public_ip = true
-    security_groups  = [aws_security_group.app_sg.id]
+    security_groups  = [aws_security_group.cf-service-fargate_sg.id]
   }
 
   load_balancer {
-    target_group_arn = aws_lb_target_group.app_tg.arn
-    container_name   = "spring-app"
+    target_group_arn = aws_lb_target_group.cf-service-fargate_tg.arn
+    container_name   = "spring-cf-service-fargate"
     container_port   = 8080
   }
 
@@ -223,9 +223,9 @@ resource "aws_iam_role_policy_attachment" "ecs_execution_role_policy" {
 
 # Outputs
 output "ecr_repository_url" {
-  value = aws_ecr_repository.app_repo.repository_url
+  value = aws_ecr_repository.cf-service-fargate_repo.repository_url
 }
 
 output "alb_dns_name" {
-  value = aws_lb.app_lb.dns_name
+  value = aws_lb.cf-service-fargate_lb.dns_name
 }
